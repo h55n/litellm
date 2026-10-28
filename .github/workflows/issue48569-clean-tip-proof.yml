@@ -1,0 +1,53 @@
+name: Issue 48569 clean tip proof
+on:
+  push:
+    branches: [test-48569-clean-tip-proof]
+    paths: [.github/workflows/issue48569-clean-tip-proof.yml]
+permissions:
+  contents: read
+  actions: read
+jobs:
+  clean-tip-proof:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 90
+    env:
+      BASE_REF: f6f49d16cc2422d2a83c93c074e0ac4d6a889cc5
+      LITELLM_LOCAL_MODEL_COST_MAP: 'True'
+      PYTHON_DOTENV_DISABLED: '1'
+      LINT_JOBS: '2'
+    steps:
+      - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955
+        with:
+          ref: d4ac4959109b4a40ab4c49f0ea1dedad4a279fd4
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify exact clean tip and load external proof
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = d4ac4959109b4a40ab4c49f0ea1dedad4a279fd4
+          test "$(git diff --name-only "$BASE_REF" HEAD | wc -l)" -eq 2
+          git show 85f0e2267caa119a747c636a1688c231a5bcb497:proof/issue48569_repro.py > "$RUNNER_TEMP/issue48569_repro.py"
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - uses: ./.github/actions/setup-uv-with-retries
+        with:
+          version: '0.10.9'
+      - name: Install locked environment and generate Prisma
+        run: |
+          set -euo pipefail
+          uv lock --check
+          uv sync --frozen --extra proxy --group proxy-dev --group e2e-dev
+          uv run --no-sync prisma generate --schema litellm/proxy/schema.prisma
+      - name: Run complete affected files and real HTTP proof
+        run: |
+          set -euo pipefail
+          uv run --no-sync pytest tests/unit/proxy/mcp_server/test_mcp_server_manager.py tests/unit/proxy/mcp_server/test_mcp_oauth_passthrough_tools.py tests/unit/proxy/mcp_server/faults/test_list_outcomes.py -q
+          PYTHONPATH="$PWD" uv run --no-sync python "$RUNNER_TEMP/issue48569_repro.py"
+      - name: Run unchanged canonical lint
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          make lint
+          test -z "$(git status --porcelain --untracked-files=no)"
