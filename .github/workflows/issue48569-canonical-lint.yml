@@ -33,4 +33,5 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          uv sync --frozen --extra proxy --group proxy-dev --group e2e-dev
           make lint 2>&1 | tee "$RUNNER_TEMP/issue48569-canonical-lint.log"
